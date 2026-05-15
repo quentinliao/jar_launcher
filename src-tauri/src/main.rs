@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    jarbox_temp_lib::run()
+    jarbox_lib::run()
 }
