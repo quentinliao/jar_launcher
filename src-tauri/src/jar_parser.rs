@@ -119,6 +119,7 @@ pub fn parse_name_from_filename(filename: &str) -> (String, Option<String>) {
 
 /// Infer the major JDK version from a build JDK string.
 /// e.g., "1.8.0_402" -> 8, "17.0.10" -> 17, "11.0.22" -> 11
+#[allow(dead_code)]
 pub fn infer_jdk_major_version(build_jdk: &str) -> Option<u32> {
     let version_str = build_jdk.trim();
 

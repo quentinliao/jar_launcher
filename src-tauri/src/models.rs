@@ -30,6 +30,7 @@ pub struct JarApp {
     pub show_console: bool,
     pub added_at: String,
     #[serde(skip)]
+    #[allow(dead_code)]
     pub running: Option<u32>,
 }
 

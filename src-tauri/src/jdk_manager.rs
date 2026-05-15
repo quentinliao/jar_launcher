@@ -282,9 +282,6 @@ pub async fn download_jdk(
     let extract_dir = install_dir.join(format!("jdk-{}", major_version));
     extract_archive(&archive_path, &extract_dir)?;
 
-    // Clean up archive
-    let _ = fs::remove_file(&archive_path);
-
     // Find the actual JDK home inside the extracted directory
     let jdk_home = find_extracted_jdk_home(&extract_dir);
 
