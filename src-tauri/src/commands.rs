@@ -350,6 +350,11 @@ pub async fn launch_app(
     let mut cmd = Command::new(&java_bin);
     cmd.stdin(std::process::Stdio::null());
 
+    // Set working directory to the JAR file's parent so the app can write config files
+    if let Some(jar_dir) = PathBuf::from(&jar_path).parent() {
+        cmd.current_dir(jar_dir);
+    }
+
     for arg in &jvm_args {
         cmd.arg(arg);
     }
