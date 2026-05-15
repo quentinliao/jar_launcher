@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
@@ -295,72 +296,108 @@ pub fn remove_jdk(jdk_id: String, state: State<'_, AppState>) -> Result<(), Stri
 }
 
 #[tauri::command]
-pub fn launch_app(app_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let cfg = state.config.lock().map_err(|e| format!("Lock error: {}", e))?;
+pub async fn launch_app(app_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let (java_bin, jar_path, jvm_args, app_args, show_console) = {
+        let cfg = state.config.lock().map_err(|e| format!("Lock error: {}", e))?;
 
-    let app = cfg
-        .apps
-        .iter()
-        .find(|a| a.id == app_id)
-        .ok_or("App not found")?;
-
-    // Find JDK to use
-    let jdk = if let Some(jdk_id) = &app.jdk_id {
-        cfg.jdks
+        let app = cfg
+            .apps
             .iter()
-            .find(|j| &j.id == jdk_id)
-            .ok_or("Configured JDK not found")?
-            .clone()
-    } else {
-        // Auto-select: find the latest JDK
-        cfg.jdks
-            .iter()
-            .max_by_key(|j| j.major_version)
-            .ok_or("No JDK available. Please add a JDK first.")?
-            .clone()
-    };
+            .find(|a| a.id == app_id)
+            .ok_or("App not found")?;
 
-    let java_bin = if cfg!(target_os = "windows") {
-        PathBuf::from(&jdk.path).join("bin/java.exe")
-    } else {
-        PathBuf::from(&jdk.path).join("bin/java")
-    };
+        let jdk = if let Some(jdk_id) = &app.jdk_id {
+            cfg.jdks
+                .iter()
+                .find(|j| &j.id == jdk_id)
+                .ok_or("Configured JDK not found")?
+                .clone()
+        } else {
+            cfg.jdks
+                .iter()
+                .max_by_key(|j| j.major_version)
+                .ok_or("No JDK available. Please add a JDK first.")?
+                .clone()
+        };
 
-    if !java_bin.exists() {
-        return Err(format!("Java binary not found at {:?}", java_bin));
-    }
+        let java_bin = if cfg!(target_os = "windows") {
+            PathBuf::from(&jdk.path).join("bin/java.exe")
+        } else {
+            PathBuf::from(&jdk.path).join("bin/java")
+        };
+
+        if !java_bin.exists() {
+            return Err(format!("Java binary not found at {:?}", java_bin));
+        }
+
+        (
+            java_bin,
+            app.jar_path.clone(),
+            app.jvm_args.clone(),
+            app.app_args.clone(),
+            app.show_console,
+        )
+    };
 
     // Build command
     let mut cmd = Command::new(&java_bin);
+    cmd.stdin(std::process::Stdio::null());
 
-    // Add JVM args
-    for arg in &app.jvm_args {
+    for arg in &jvm_args {
         cmd.arg(arg);
     }
-
-    // Add JAR path
     cmd.arg("-jar");
-    cmd.arg(&app.jar_path);
-
-    // Add app args
-    for arg in &app.app_args {
+    cmd.arg(&jar_path);
+    for arg in &app_args {
         cmd.arg(arg);
     }
 
-    // Configure stdout/stderr based on show_console
-    if !app.show_console {
+    if show_console {
+        cmd.stdout(std::process::Stdio::inherit());
+        cmd.stderr(std::process::Stdio::inherit());
+    } else {
+        // Capture stderr to detect immediate launch failures
         cmd.stdout(std::process::Stdio::null());
-        cmd.stderr(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::piped());
     }
 
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to launch application: {}", e))?;
 
     let pid = child.id();
 
+    // Give the process a moment — if it crashes immediately, capture the error
+    if !show_console {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                // Process already exited — read stderr for the error message
+                let stderr = child
+                    .stderr
+                    .take()
+                    .and_then(|mut s| {
+                        let mut buf = String::new();
+                        s.read_to_string(&mut buf).ok().map(|_| buf)
+                    })
+                    .unwrap_or_default();
+                return Err(format!(
+                    "Application exited immediately (code: {}){}",
+                    status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".to_string()),
+                    if stderr.is_empty() { String::new() } else { format!(":\n{}", stderr.trim()) }
+                ));
+            }
+            Ok(None) => {
+                // Still running — good. Detach stderr to let process continue.
+                drop(child.stderr.take());
+            }
+            Err(e) => {
+                return Err(format!("Failed to check process status: {}", e));
+            }
+        }
+    }
+
     // Store PID
-    drop(cfg); // Release config lock before acquiring process lock
     let mut processes = state
         .running_processes
         .lock()
