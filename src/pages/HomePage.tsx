@@ -1,6 +1,7 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Plus, Upload } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { JarApp, JdkInfo } from "../types";
 import AppCard from "../components/AppCard";
 import ContextMenu, { defaultAppMenuItems } from "../components/ContextMenu";
@@ -44,6 +45,30 @@ export default function HomePage({
   } | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
+  // Use Tauri native drag-drop events instead of HTML5 Drag API
+  // HTML5 Drag API doesn't expose file paths in WKWebView (macOS)
+  useEffect(() => {
+    const unlisten = getCurrentWindow().onDragDropEvent((event) => {
+      if (event.payload.type === "over") {
+        setDragOver(true);
+      } else if (event.payload.type === "drop") {
+        setDragOver(false);
+        const paths: string[] = event.payload.paths;
+        for (const path of paths) {
+          if (path.endsWith(".jar")) {
+            addApp(path);
+          }
+        }
+      } else if (event.payload.type === "leave") {
+        setDragOver(false);
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [addApp]);
+
   const handleAddByPicker = useCallback(async () => {
     const selected = await open({
       multiple: false,
@@ -54,36 +79,6 @@ export default function HomePage({
     }
   }, [addApp]);
 
-  const handleDrop = useCallback(
-    async (e: React.DragEvent) => {
-      e.preventDefault();
-      setDragOver(false);
-
-      const files = e.dataTransfer.files;
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        if (file.name.endsWith(".jar")) {
-          // In Tauri webview, file.path gives the absolute path
-          const path = (file as File & { path?: string }).path;
-          if (path) {
-            await addApp(path);
-          }
-        }
-      }
-    },
-    [addApp],
-  );
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-  }, []);
-
   const handleUpdateJar = useCallback(
     async (app: JarApp) => {
       const selected = await open({
@@ -91,9 +86,7 @@ export default function HomePage({
         filters: [{ name: "JAR 文件", extensions: ["jar"] }],
       });
       if (selected) {
-        // Check for version downgrade
         const oldVersion = app.version;
-        // Extract version from new jar filename as rough comparison
         const newFileName = selected.split("/").pop() ?? selected.split("\\").pop() ?? "";
         const versionMatch = newFileName.match(/(\d+\.\d+(?:\.\d+)?)/);
         const newVersion = versionMatch ? versionMatch[1] : null;
@@ -141,12 +134,7 @@ export default function HomePage({
   );
 
   return (
-    <div
-      className="flex h-full flex-col overflow-auto bg-gray-50 dark:bg-gray-950"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
+    <div className="flex h-full flex-col overflow-auto bg-gray-50 dark:bg-gray-950">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4 dark:border-gray-700 dark:bg-gray-900">
         <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
@@ -161,6 +149,18 @@ export default function HomePage({
           添加应用
         </button>
       </div>
+
+      {/* Drop overlay - shown when files are dragged over */}
+      {dragOver && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-blue-500/10 backdrop-blur-sm">
+          <div className="rounded-2xl border-2 border-dashed border-blue-400 bg-white/90 px-12 py-8 text-center dark:bg-gray-800/90">
+            <Upload size={48} className="mx-auto mb-4 text-blue-500" />
+            <p className="text-lg font-medium text-blue-600 dark:text-blue-400">
+              松开以添加 JAR 应用
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       <div className="flex-1 p-6">
