@@ -19,6 +19,7 @@ export interface JdkInfo {
   vendor: string;
   path: string;
   source: "system" | "downloaded" | "manual";
+  supports_javafx: boolean;
 }
 
 export interface AppConfig {

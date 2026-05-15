@@ -25,3 +25,9 @@ target/
 *.njsproj
 *.sln
 *.sw?
+
+# Claude
+.claude/
+
+# Misc
+src-tauri/config_ama.ini

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::config;
 use crate::jar_parser;
@@ -232,6 +232,9 @@ pub async fn discover_jdks(state: State<'_, AppState>) -> Result<Vec<JdkInfo>, S
     for jdk in &system_jdks {
         if !existing_paths.contains(&jdk.path) {
             cfg.jdks.push(jdk.clone());
+        } else if let Some(existing) = cfg.jdks.iter_mut().find(|j| j.path == jdk.path) {
+            // Refresh JavaFX status for existing JDKs
+            existing.supports_javafx = jdk.supports_javafx;
         }
     }
 
@@ -296,7 +299,11 @@ pub fn remove_jdk(jdk_id: String, state: State<'_, AppState>) -> Result<(), Stri
 }
 
 #[tauri::command]
-pub async fn launch_app(app_id: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn launch_app(
+    app_id: String,
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let (java_bin, jar_path, jvm_args, app_args, show_console) = {
         let cfg = state.config.lock().map_err(|e| format!("Lock error: {}", e))?;
 
@@ -356,7 +363,6 @@ pub async fn launch_app(app_id: String, state: State<'_, AppState>) -> Result<()
         cmd.stdout(std::process::Stdio::inherit());
         cmd.stderr(std::process::Stdio::inherit());
     } else {
-        // Capture stderr to detect immediate launch failures
         cmd.stdout(std::process::Stdio::null());
         cmd.stderr(std::process::Stdio::piped());
     }
@@ -367,12 +373,11 @@ pub async fn launch_app(app_id: String, state: State<'_, AppState>) -> Result<()
 
     let pid = child.id();
 
-    // Give the process a moment — if it crashes immediately, capture the error
+    // Quick check for immediate launch failures (500ms grace period)
     if !show_console {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         match child.try_wait() {
             Ok(Some(status)) => {
-                // Process already exited — read stderr for the error message
                 let stderr = child
                     .stderr
                     .take()
@@ -387,10 +392,7 @@ pub async fn launch_app(app_id: String, state: State<'_, AppState>) -> Result<()
                     if stderr.is_empty() { String::new() } else { format!(":\n{}", stderr.trim()) }
                 ));
             }
-            Ok(None) => {
-                // Still running — good. Detach stderr to let process continue.
-                drop(child.stderr.take());
-            }
+            Ok(None) => { /* still running */ }
             Err(e) => {
                 return Err(format!("Failed to check process status: {}", e));
             }
@@ -398,11 +400,49 @@ pub async fn launch_app(app_id: String, state: State<'_, AppState>) -> Result<()
     }
 
     // Store PID
-    let mut processes = state
-        .running_processes
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))?;
-    processes.insert(app_id, pid);
+    {
+        let mut processes = state
+            .running_processes
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        processes.insert(app_id.clone(), pid);
+    }
+
+    // Spawn background monitor to detect late crashes and process exit
+    let monitor_app_id = app_id;
+    tokio::task::spawn_blocking(move || {
+        let stderr_pipe = child.stderr.take();
+        match child.wait() {
+            Ok(status) => {
+                let stderr = stderr_pipe
+                    .and_then(|mut s| {
+                        let mut buf = String::new();
+                        s.read_to_string(&mut buf).ok().map(|_| buf)
+                    })
+                    .unwrap_or_default();
+                let _ = app_handle.emit(
+                    "process-exit",
+                    serde_json::json!({
+                        "app_id": monitor_app_id,
+                        "exit_code": status.code(),
+                        "stderr": stderr,
+                        "success": status.success(),
+                    }),
+                );
+            }
+            Err(e) => {
+                let _ = app_handle.emit(
+                    "process-exit",
+                    serde_json::json!({
+                        "app_id": monitor_app_id,
+                        "exit_code": null,
+                        "stderr": format!("Failed to monitor process: {}", e),
+                        "success": false,
+                    }),
+                );
+            }
+        }
+    });
 
     Ok(())
 }

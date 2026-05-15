@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+fn default_false() -> bool {
+    false
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub apps: Vec<JarApp>,
@@ -42,6 +46,8 @@ pub struct JdkInfo {
     pub vendor: String,
     pub path: String,
     pub source: JdkSource,
+    #[serde(default = "default_false")]
+    pub supports_javafx: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

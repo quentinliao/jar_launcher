@@ -1,10 +1,40 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { JarApp, AppConfig } from "../types";
 
 export function useApps(initialApps: JarApp[]) {
   const [apps, setApps] = useState<JarApp[]>(initialApps);
   const [loading, setLoading] = useState(false);
+  const [launchError, setLaunchError] = useState<{
+    appName: string;
+    message: string;
+  } | null>(null);
+
+  // Listen for process-exit events from the backend
+  useEffect(() => {
+    const unlisten = listen<{
+      app_id: string;
+      exit_code: number | null;
+      stderr: string;
+      success: boolean;
+    }>("process-exit", (event) => {
+      const { app_id, exit_code, stderr, success } = event.payload;
+      setApps((prev) =>
+        prev.map((a) => (a.id === app_id ? { ...a, running: null } : a)),
+      );
+      if (!success) {
+        const appName =
+          apps.find((a) => a.id === app_id)?.name ?? "未知应用";
+        const errorDetail =
+          stderr.trim() || `进程异常退出 (退出码: ${exit_code ?? "信号终止"})`;
+        setLaunchError({ appName, message: errorDetail });
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [apps]);
 
   const refreshApps = useCallback(async () => {
     try {
@@ -104,9 +134,14 @@ export function useApps(initialApps: JarApp[]) {
     }
   }, []);
 
+  const clearLaunchError = useCallback(() => {
+    setLaunchError(null);
+  }, []);
+
   return {
     apps,
     loading,
+    launchError,
     refreshApps,
     addApp,
     removeApp,
@@ -114,5 +149,6 @@ export function useApps(initialApps: JarApp[]) {
     updateJar,
     launchApp,
     openFileLocation,
+    clearLaunchError,
   };
 }

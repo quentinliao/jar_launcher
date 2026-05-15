@@ -103,6 +103,11 @@ export default function JdkPage({
                       >
                         {source.label}
                       </span>
+                      {jdk.supports_javafx && (
+                        <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
+                          JavaFX
+                        </span>
+                      )}
                       {jdk.source === "downloaded" && (
                         <button
                           onClick={() => removeJdk(jdk.id)}

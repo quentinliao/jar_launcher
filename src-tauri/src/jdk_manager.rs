@@ -107,6 +107,7 @@ fn probe_jdk(home: &Path) -> Option<JdkInfo> {
         .unwrap_or_else(|| ("Unknown".to_string(), 0));
 
     let vendor = guess_vendor_from_path(home);
+    let supports_javafx = detect_javafx_support(home);
 
     Some(JdkInfo {
         id: uuid::Uuid::new_v4().to_string(),
@@ -115,7 +116,28 @@ fn probe_jdk(home: &Path) -> Option<JdkInfo> {
         vendor,
         path: home.to_string_lossy().to_string(),
         source: JdkSource::System,
+        supports_javafx,
     })
+}
+
+/// Detect if a JDK bundles JavaFX by checking for javafx modules/jars.
+fn detect_javafx_support(home: &Path) -> bool {
+    // JDK 9+: check for jmods/javafx.base.jmod
+    if home.join("jmods/javafx.base.jmod").exists() {
+        return true;
+    }
+    // JDK 11+ with bundled JavaFX: lib/javafx.base.jar
+    if home.join("lib/javafx.base.jar").exists() {
+        return true;
+    }
+    // JDK 8: jre/lib/ext/jfxrt.jar (Oracle JDK) or jre/lib/javafx.properties
+    if home.join("jre/lib/ext/jfxrt.jar").exists() {
+        return true;
+    }
+    if home.join("jre/lib/javafx.properties").exists() {
+        return true;
+    }
+    false
 }
 
 /// Try to read JAVA_VERSION from the release file in the JDK home.
@@ -289,6 +311,8 @@ pub async fn download_jdk(
     let (version, major) = read_version_from_release_file(&jdk_home)
         .unwrap_or_else(|| (major_version.to_string(), major_version));
 
+    let supports_javafx = detect_javafx_support(&jdk_home);
+
     // Clean up archive file
     let _ = fs::remove_file(&archive_path);
 
@@ -299,6 +323,7 @@ pub async fn download_jdk(
         vendor: vendor.to_string(),
         path: jdk_home.to_string_lossy().to_string(),
         source: JdkSource::Downloaded,
+        supports_javafx,
     })
 }
 

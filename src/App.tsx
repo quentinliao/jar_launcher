@@ -107,12 +107,14 @@ function AppShell({
             apps={appsHook.apps}
             jdks={jdksHook.jdks}
             loading={appsHook.loading}
+            launchError={appsHook.launchError}
             addApp={appsHook.addApp}
             removeApp={appsHook.removeApp}
             updateApp={appsHook.updateApp}
             updateJar={appsHook.updateJar}
             launchApp={appsHook.launchApp}
             openFileLocation={appsHook.openFileLocation}
+            clearLaunchError={appsHook.clearLaunchError}
           />
         )}
         {page === "jdk" && (

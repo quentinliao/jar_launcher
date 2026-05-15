@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { Plus, Upload } from "lucide-react";
+import { Plus, Upload, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { JarApp, JdkInfo } from "../types";
@@ -12,24 +12,28 @@ interface HomePageProps {
   apps: JarApp[];
   jdks: JdkInfo[];
   loading: boolean;
+  launchError: { appName: string; message: string } | null;
   addApp: (path: string) => Promise<JarApp | null>;
   removeApp: (appId: string) => Promise<void>;
   updateApp: (appId: string, updates: Record<string, unknown>) => Promise<JarApp | null>;
   updateJar: (appId: string, jarPath: string) => Promise<JarApp | null>;
   launchApp: (appId: string) => Promise<void>;
   openFileLocation: (path: string) => Promise<void>;
+  clearLaunchError: () => void;
 }
 
 export default function HomePage({
   apps,
   jdks,
   loading,
+  launchError,
   addApp,
   removeApp,
   updateApp,
   updateJar,
   launchApp,
   openFileLocation,
+  clearLaunchError,
 }: HomePageProps) {
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -242,6 +246,39 @@ export default function HomePage({
           onConfirm={handleConfirmVersionDowngrade}
           onCancel={() => setVersionDialog(null)}
         />
+      )}
+
+      {/* Launch Error Dialog */}
+      {launchError && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-gray-800">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-red-600 dark:text-red-400">
+                应用启动失败
+              </h2>
+              <button
+                onClick={clearLaunchError}
+                className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="mb-2 text-sm font-medium text-gray-900 dark:text-gray-100">
+              {launchError.appName}
+            </p>
+            <pre className="max-h-60 overflow-auto rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-900 dark:text-gray-300">
+              {launchError.message}
+            </pre>
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={clearLaunchError}
+                className="rounded-lg bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

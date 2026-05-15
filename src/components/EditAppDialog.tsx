@@ -100,7 +100,7 @@ export default function EditAppDialog({
               <option value="">自动匹配</option>
               {jdks.map((jdk) => (
                 <option key={jdk.id} value={jdk.id}>
-                  {jdk.version} ({jdk.vendor}) - {jdk.path}
+                  {jdk.version} ({jdk.vendor}){jdk.supports_javafx ? " [JavaFX]" : ""} - {jdk.path}
                 </option>
               ))}
             </select>
